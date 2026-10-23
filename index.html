@@ -68,8 +68,15 @@ const F='"Inter","Segoe UI",system-ui,-apple-system,Arial,sans-serif';
 let S={};try{S=JSON.parse(localStorage.getItem('fisio2'))||{}}catch(e){}
 const blank=()=>({bid:'',name:'',desc:'',img:'',pos:'',sets:'',reps:'',rest:'',note:''});
 const NEWD=()=>({patient:'',date:'',dx:'',n:4,hid:'',items:[0,1,2,3,4,5].map(blank)});
-S.ex=S.ex||[];S.hist=S.hist||[];S.n=S.n||0;S.d=S.d||NEWD();
-function save(){try{localStorage.setItem('fisio2',JSON.stringify(S))}catch(e){alert('Almacenamiento lleno: usa fotos más pequeñas o exporta una copia y borra envíos antiguos.')}}
+const norm=()=>{S.ex=S.ex||[];S.hist=S.hist||[];S.n=S.n||0;S.d=S.d||NEWD()};norm();
+let st,warned=false,dbp;
+const idb=()=>dbp||(dbp=new Promise((res,rej)=>{const r=indexedDB.open('fisio',1);r.onupgradeneeded=()=>r.result.createObjectStore('k');r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)}));
+const load=async()=>{try{const db=await idb();return await new Promise(r=>{const q=db.transaction('k').objectStore('k').get('S');q.onsuccess=()=>r(q.result);q.onerror=()=>r(null)})}catch(e){return null}};
+async function flush(){try{const db=await idb();await new Promise((res,rej)=>{const t=db.transaction('k','readwrite');t.objectStore('k').put(S,'S');t.oncomplete=res;t.onerror=()=>rej(t.error);t.onabort=()=>rej(t.error)})}catch(e){if(!warned){warned=true;alert('No se pudo guardar en este navegador (¿modo privado o almacenamiento lleno?). Exporta una copia de seguridad.')}}}
+function save(){clearTimeout(st);st=setTimeout(flush,400)}
+addEventListener('pagehide',()=>{clearTimeout(st);flush()});
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden'){clearTimeout(st);flush()}});
+async function boot(){const d=await load();if(d&&Array.isArray(d.ex)){S=d;norm()}else save();render()}
 function toast(t){const d=document.createElement('div');d.textContent=t;d.style.cssText='position:fixed;left:50%;bottom:30px;transform:translateX(-50%);background:#0f172a;color:#fff;padding:10px 18px;border-radius:20px;z-index:99;box-shadow:0 4px 14px #0005';document.body.appendChild(d);setTimeout(()=>d.remove(),2600)}
 //#PDF
 const IMG={};
@@ -140,7 +147,7 @@ async function sharePdf(rec){const blob=mkPdf(await buildSheet(rec)),name=fname(
  $('#mbox').innerHTML=`<div class="bar"><b>${esc(name)}</b><button class="btn s" data-act="close">Cerrar</button></div><p>Tu navegador no permite compartir directamente. Pulsa para descargar o abrir el PDF y guárdalo desde ahí.</p><div class="bar"><a class="btn" href="${url}" download="${esc(name)}">Descargar PDF</a><a class="btn s" href="${url}" target="_blank">Abrir PDF</a></div>`;
  $('#modal').style.display='flex'}
 function commit(items){items.forEach(it=>{if(it.bid)return;const nm=it.name.trim();let b=S.ex.find(x=>x.name.trim().toLowerCase()===nm.toLowerCase()&&x.desc===it.desc);
- if(!b){S.n++;b={id:'E'+pad3(S.n),name:nm,desc:it.desc,img:it.img||''};S.ex.push(b)}else if(!b.img&&it.img)b.img=it.img;it.bid=b.id;it.img='';it.name=nm})}
+ if(!b){S.n++;b={id:'E'+pad3(S.n),name:nm,desc:it.desc,pos:it.pos||'',img:it.img||''};S.ex.push(b)}else{if(!b.img&&it.img)b.img=it.img;if(!b.pos&&it.pos)b.pos=it.pos}it.bid=b.id;it.img='';it.name=nm})}
 async function generate(){const d=S.d,items=d.items.slice(0,d.n);
  if(!d.patient.trim())return alert('Escribe el nombre del paciente.');
  const bad=items.findIndex(i=>!i.name.trim());if(bad>=0)return alert('Al ejercicio '+(bad+1)+' le falta el nombre. Rellénalo, elígelo de la batería o reduce el número de ejercicios.');
@@ -150,18 +157,18 @@ async function generate(){const d=S.d,items=d.items.slice(0,d.n);
  save();toast('Guardado en el histórico y en la batería');await sharePdf(rec)}
 async function preview(){const d=S.d,cv=await buildSheet({patient:d.patient,date:d.date||today(),dx:d.dx,items:d.items.slice(0,d.n)});
  $('#mbox').innerHTML=`<div class="bar"><b>Vista previa</b><button class="btn s" data-act="close">Cerrar</button></div>`+cv.map(x=>`<img src="${x.toDataURL('image/jpeg',.8)}" style="width:100%;margin-bottom:10px;border:1px solid var(--bd)">`).join('');$('#modal').style.display='flex'}
-const slot=(it,i)=>{const lk=!!it.bid,b=lk&&S.ex.find(x=>x.id===it.bid),im=lk?(b&&b.img):it.img,ro=lk?'readonly':'',f=(k,l,x='')=>`<label>${l}<input data-s="${i}" data-f="${k}" ${x} value="${esc(it[k])}"></label>`;
+const slot=(it,i)=>{const lk=!!it.bid,b=lk&&S.ex.find(x=>x.id===it.bid),im=lk?(b&&b.img):it.img,ro=lk?'readonly':'',bp=lk&&b&&b.pos?'readonly':'',f=(k,l,x='')=>`<label>${l}<input data-s="${i}" data-f="${k}" ${x} value="${esc(it[k])}"></label>`;
  return `<div class="card"><div class="bar" style="margin:0;justify-content:space-between"><b style="font-size:17px"><span class="num">${i+1}</span>Ejercicio</b><span><button class="btn s" data-act="pk" data-i="${i}">${lk?'Cambiar':'Elegir de la batería'}</button> ${(lk||it.name||it.desc||it.img)?`<button class="btn s" data-act="vac" data-i="${i}">Vaciar</button>`:''}</span></div>
  <div class="sl"><label class="im">${im?`<img src="${im}">`:'Añadir foto del móvil'}${lk?'':`<input type="file" accept="image/*" data-simg="${i}" hidden>`}</label>
  <div class="col"><label class="f1">Nombre del ejercicio<input data-s="${i}" data-f="name" ${ro} value="${esc(it.name)}"></label>
- <label class="f1">Posición<input data-s="${i}" data-f="pos" list="dp" value="${esc(it.pos)}"></label></div></div>
+ <label class="f1">Posición<input data-s="${i}" data-f="pos" list="dp" ${bp} value="${esc(it.pos)}"></label></div></div>
  <label class="f1">Descripción / ejecución${lk?' (de la batería)':''}<textarea data-s="${i}" data-f="desc" ${ro}>${esc(it.desc)}</textarea></label>
  <div class="f3">${f('sets','Series')}${f('reps','Repeticiones / tiempo')}${f('rest','Descanso')}</div>
  <label class="f1">Nota destacada (opcional)<textarea class="note" data-s="${i}" data-f="note" placeholder="Ej.: Si hay dolor parar inmediatamente">${esc(it.note)}</textarea></label></div>`};
 const filt=()=>S.ex.filter(e=>!q||(e.name+' '+e.desc).toLowerCase().includes(q));
-const bcard=e=>`<div class="card"><div style="display:flex;justify-content:space-between;align-items:center"><b>${e.id}</b><button class="btn d" data-act="dele" data-id="${e.id}">Eliminar</button></div><label class="im">${e.img?`<img src="${e.img}">`:'Añadir imagen'}<input type="file" accept="image/*" data-img="${e.id}" hidden></label><label class="f1">Nombre<input data-e="${e.id}" data-f="name" value="${esc(e.name)}"></label><label class="f1">Descripción del ejercicio<textarea data-e="${e.id}" data-f="desc">${esc(e.desc)}</textarea></label></div>`;
+const bcard=e=>`<div class="card"><div style="display:flex;justify-content:space-between;align-items:center"><b>${e.id}</b><button class="btn d" data-act="dele" data-id="${e.id}">Eliminar</button></div><label class="im">${e.img?`<img src="${e.img}">`:'Añadir imagen'}<input type="file" accept="image/*" data-img="${e.id}" hidden></label><label class="f1">Nombre<input data-e="${e.id}" data-f="name" value="${esc(e.name)}"></label><label class="f1">Posición<input data-e="${e.id}" data-f="pos" list="dp" value="${esc(e.pos)}"></label><label class="f1">Descripción del ejercicio<textarea data-e="${e.id}" data-f="desc">${esc(e.desc)}</textarea></label></div>`;
 const bat=()=>filt().map(bcard).join('')||'<p>No hay ejercicios. Se añaden solos al generar una pauta con un ejercicio nuevo, o créalos aquí.</p>';
-const pkl=()=>{const L=S.ex.filter(e=>!pq||(e.name+' '+e.desc).toLowerCase().includes(pq));return L.length?L.map(e=>`<div data-act="pick" data-id="${e.id}">${e.img?`<img src="${e.img}">`:''}<b>${esc(e.name||'Sin nombre')}</b></div>`).join(''):'<p>La batería está vacía.</p>'};
+const pkl=()=>{const L=S.ex.filter(e=>!pq||(e.name+' '+e.desc).toLowerCase().includes(pq));return L.length?L.map(e=>`<div data-act="pick" data-id="${e.id}">${e.img?`<img src="${e.img}">`:''}<b>${esc(e.name||'Sin nombre')}</b><br><small>${esc(e.pos||'')}</small></div>`).join(''):'<p>La batería está vacía.</p>'};
 const hl=()=>{const L=S.hist.filter(h=>!hq||(h.patient+' '+h.items.map(i=>i.name).join(' ')).toLowerCase().includes(hq)).sort((a,b)=>b.date.localeCompare(a.date)||b.id.localeCompare(a.id));
  return L.length?L.map(h=>`<div class="card"><div><b style="font-size:17px">${esc(h.patient)}</b><div style="color:var(--mu)">${fmt(h.date)} · ${h.items.length} ejercicios</div></div><div>${h.items.map(i=>`<span class="tag">${esc(i.name)}</span>`).join('')}</div><div class="bar" style="margin:0"><button class="btn" data-act="hpdf" data-id="${h.id}">PDF</button><button class="btn s" data-act="hre" data-id="${h.id}">Reutilizar para otro paciente</button><button class="btn d" data-act="hd" data-id="${h.id}">Eliminar</button></div></div>`).join(''):'<p>No hay envíos que coincidan.</p>'};
 function render(){const a=$('#app');
@@ -187,16 +194,16 @@ document.addEventListener('click',e=>{const t=e.target.closest('[data-act]');if(
  else if(a==='prev')preview();
  else if(a==='clr'){if(confirm('¿Empezar una pauta nueva? Se borra lo que hay en pantalla (el histórico no cambia).')){S.d=NEWD();save();render()}}
  else if(a==='pk'){pi=+d.i;pq='';$('#mbox').innerHTML=`<div class="bar"><b>Elegir ejercicio</b><input id="pq" placeholder="Buscar…"><button class="btn s" data-act="close">Cerrar</button></div><div class="pk" id="pl">${pkl()}</div>`;$('#modal').style.display='flex'}
- else if(a==='pick'){const b=S.ex.find(x=>x.id===d.id),it=S.d.items[pi];if(b){Object.assign(it,{bid:b.id,name:b.name,desc:b.desc,img:''});save();m();render()}}
+ else if(a==='pick'){const b=S.ex.find(x=>x.id===d.id),it=S.d.items[pi];if(b){Object.assign(it,{bid:b.id,name:b.name,desc:b.desc,img:'',pos:b.pos||it.pos});save();m();render()}}
  else if(a==='vac'){const it=S.d.items[+d.i];Object.assign(it,{bid:'',name:'',desc:'',img:''});save();render()}
- else if(a==='adde'){S.n++;S.ex.push({id:'E'+pad3(S.n),name:'',desc:'',img:''});save();render()}
+ else if(a==='adde'){S.n++;S.ex.push({id:'E'+pad3(S.n),name:'',desc:'',pos:'',img:''});save();render()}
  else if(a==='dele'){if(confirm('¿Eliminar ejercicio de la batería? Las pautas ya enviadas conservan el texto, pero perderán la imagen.')){S.ex=S.ex.filter(x=>x.id!==d.id);S.d.items.forEach(i=>{if(i.bid===d.id)i.bid=''});save();render()}}
  else if(a==='hpdf'){const h=S.hist.find(x=>x.id===d.id);if(h)sharePdf(h)}
  else if(a==='hre'){const h=S.hist.find(x=>x.id===d.id);if(!h)return;const n=Math.min(6,Math.max(4,h.items.length));S.d=NEWD();S.d.n=n;S.d.dx=h.dx||'';h.items.forEach((it,i)=>{if(i<6)S.d.items[i]={...blank(),...it,bid:S.ex.some(x=>x.id===it.bid)?it.bid:''}});save();view='ho';render();toast('Pauta cargada: escribe el nuevo paciente')}
  else if(a==='hd'){if(confirm('¿Eliminar este envío del histórico?')){S.hist=S.hist.filter(x=>x.id!==d.id);save();$('#hl').innerHTML=hl()}}
  else if(a==='bkx')exportBk()});
 document.addEventListener('input',e=>{const t=e.target,d=t.dataset;
- if(d.s!==undefined){S.d.items[+d.s][d.f]=t.value;save()}
+ if(d.s!==undefined){const it=S.d.items[+d.s];it[d.f]=t.value;if(d.f==='pos'&&it.bid){const b=S.ex.find(x=>x.id===it.bid);if(b)b.pos=t.value}save()}
  else if(d.e){const x=S.ex.find(q=>q.id===d.e);if(x){x[d.f]=t.value;save()}}
  else if(t.id==='pac'){S.d.patient=t.value;save()}
  else if(t.id==='fec'){S.d.date=t.value;save()}
@@ -217,7 +224,7 @@ async function exportBk(){const json=JSON.stringify(S),name='copia_fisio_'+today
 function importBk(file){const r=new FileReader();r.onload=()=>{try{const d=JSON.parse(r.result);if(!Array.isArray(d.ex)||!Array.isArray(d.hist))throw 0;
  if(!confirm('Esto reemplaza TODOS los datos actuales por los de la copia. ¿Continuar?'))return;d.n=d.n||0;d.d=d.d||NEWD();S=d;save();view='home';render();toast('Copia importada')}catch(e){alert('El archivo no es una copia válida.')}};r.readAsText(file)}
 $('#modal').addEventListener('click',e=>{if(e.target.id==='modal')$('#modal').style.display='none'});
-render();
+boot();
 if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
 try{if(navigator.storage&&navigator.storage.persist)navigator.storage.persist()}catch(e){}
 </script></body></html>
